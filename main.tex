@@ -1,0 +1,786 @@
+\documentclass[journal]{IEEEtran}
+
+% IEEE Transactions on Multimedia manuscript format.
+% The initial regular-paper submission limit is 10 pages in the IEEE
+% double-column layout; check the current TMM author instructions before submission.
+\usepackage{amsmath,amsfonts,amssymb,mathtools}
+\usepackage{amsthm}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{arydshln}
+\usepackage[ruled,vlined,algo2e]{algorithm2e}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\usepackage{multicol}
+\usepackage{paralist}
+\usepackage{comment}
+\usepackage{verbatim}
+\usepackage{pifont}
+\usepackage{bbding}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{subcaption}
+\usepackage{microtype}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{hyperref}
+
+\hypersetup{hidelinks}
+\hyphenation{op-tical net-works semi-conduc-tor IEEE-Xplore}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% Use a visible placeholder for unavailable local figures so the manuscript
+% remains compilable; the real asset is used automatically when present.
+\newcommand{\safeincludegraphics}[2][]{%
+  \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
+    \fbox{\parbox[c][1.25in][c]{0.9\linewidth}{\centering Missing figure: \texttt{\detokenize{#2}}}}}}
+
+\definecolor{Gray}{gray}{0.9}
+\newsavebox\CBox
+\def\textBF#1{\sbox\CBox{#1}\resizebox{\wd\CBox}{\ht\CBox}{\textbf{#1}}}
+\title{Supplementary Material\\Decoupling Representation and Classifier Bias in Long-Tailed Continual Learning}
+
+% Replace the placeholder below with the complete author list, affiliations,
+% e-mail addresses, IEEE membership grades (if applicable), and funding notes.
+\author{Anonymous Author(s)}
+
+% TMM uses the standard IEEE journal two-column manuscript layout.
+\markboth{Supplementary Material}{Decoupling Representation and Classifier Bias in Long-Tailed Continual Learning}
+\begin{document}
+\maketitle
+\appendices
+
+\section{Additional Information About Related Work}\label{app:related_work}
+
+
+% ... (前面保留你对其他具体 Related Work 的介绍) ...
+
+
+\noindent\textbf{Bridging the Gap between LT-CIL and LT-DIL.}
+Crucially, most existing incremental learning literature focuses narrowly on the Class-Incremental Learning (CIL) setting, leaving the complex interplay between long-tailed class distributions and domain shifts — specifically Domain-Incremental Learning (DIL) — severely under-explored. When domain shifts co-occur with class imbalance, semantic boundaries become highly distorted. For instance, advanced prompt-based architectures (e.g., L2P, DualPrompt) lack explicit mechanisms to calibrate imbalanced gradient flows, causing the learnable prompts to be overwhelmingly hijacked by head classes during domain shifts. Conversely, traditional rehearsal-based methods (e.g., DER++, iCaRL) suffer from severe representation overfitting on tail classes when forced to replay limited minority samples across evolving domains, rendering these conventional methods ineffective.
+
+Unlike prior approaches restricted to singular or idealized CL scenarios, our work provides a comprehensive framework that explicitly tackles the long-tailed challenge across both CIL and DIL settings, demonstrating the broad applicability and robustness of our approach. By introducing a structurally decoupled architecture empowered by Dynamic Sparse Sub-network Extraction (DSSE), Bounded Re-sampling and Dynamic Semantic Perturbation (BRDSP), and Frequency-Aware Multi-Expert Adversarial Contrastive Learning (FAMEACL), we systematically allocate representational capacity. The DSSE mechanism strictly isolates task-specific parameters to eliminate catastrophic forgetting, while BRDSP and FAMEACL work in tandem to dynamically inject semantic diversity and enforce adaptive margins. This synergy effectively mitigates both catastrophic forgetting and long-tailed bias across diverse incremental scenarios without introducing redundant, computationally expensive parameters.
+
+\section{Additional Details on Algorithm Implementation}\label{app:algorithm_details}
+
+\subsection{Pseudocode for Core Implementations}
+To bridge the gap between our conceptual formulations and the practical engineering deployment, we provide the detailed pseudocode for the Frequency-Aware Multi-Expert Adversarial Contrastive Loss (FAMEACL) in Algorithm~\ref{alg:fameacl}, and the Two-Phase Classifier Re-Training (cRT) pipeline in Algorithm~\ref{alg:crt}. 
+
+While theoretical derivations provide a solid foundation for addressing the long-tailed continual learning (LTCL) dilemma, real-world deployment often hinges on meticulous engineering choices that are frequently omitted in standard literature. Specifically, the dynamic computation of inverse-frequency margins requires careful handling to prevent numerical instability (e.g., zero-division anomalies), and the two-phase calibration relies on strict gradient locking and perturbation deactivation to effectively rectify classifier bias without distorting the converged latent manifold. By explicitly exposing these low-level tensor operations, structural state-switching mechanisms, and hyperparameter scalings, we aim to ensure the full transparency and exact reproducibility of our framework in popular deep learning environments such as PyTorch.
+
+
+\begin{algorithm2e}[t]   % <--- 这里加上了 2e
+\caption{PyTorch-style Implementation of FAMEACL}
+\label{alg:fameacl}
+\SetAlgoLined
+\KwIn{Mini-batch inputs $\mathbf{X}$, labels $\mathbf{Y}$, task IDs $\mathbf{T}_{id}$.\\
+Current experts $\{f_{\xi_1}, \dots, f_{\xi_T}\}$, class frequency counts $\mathbf{n}$.\\
+Base margin scalar $C_{margin}$.}
+\KwOut{Contrastive Loss $\mathcal{L}_{con}$}
+\tcp{1. Compute dynamic margins based on inverse frequency}
+$m_{\mathbf{Y}} \leftarrow C_{margin} / (\mathbf{n}_{\mathbf{Y}} + 1.0)^{0.25}$\;
+\tcp{2. Forward pass to obtain stacked logits from all experts}
+$\mathbf{S}_{all} \leftarrow f_{experts}(\mathbf{X})$ \tcp*{Shape: $(B, T, C)$}
+Initialize $\mathcal{L}_{con} \leftarrow 0.0$, $N_{neg} \leftarrow 0$\;
+
+\For{each sample $i \in \{1, \dots, B\}$}{
+    $t_i \leftarrow \mathbf{T}_{id}[i]$\;
+    $y_i \leftarrow \mathbf{Y}[i]$\;
+    \tcp{Extract target score of the correct expert}
+    $S_{correct} \leftarrow \mathbf{S}_{all}[i, t_i, y_i]$\;
+    
+    \tcp{Iterate over all irrelevant experts}
+    \For{each expert $j \in \{1, \dots, T\} \setminus \{t_i\}$}{
+        $S_{wrong} \leftarrow \max_{c} \mathbf{S}_{all}[i, j, c]$\;
+        \tcp{Apply margin-ranking hinge penalty}
+        $diff \leftarrow S_{wrong} - S_{correct} + m_{y_i}$\;
+        \If{$diff > 0$}{
+            $\mathcal{L}_{con} \leftarrow \mathcal{L}_{con} + diff$\;
+        }
+        $N_{neg} \leftarrow N_{neg} + 1$\;
+    }
+}
+\Return $\mathcal{L}_{con} / \max(N_{neg}, 1)$\;
+\end{algorithm2e} % <--- 
+
+
+
+
+
+% ==========================================
+% 伪代码 2: cRT 流程
+% ==========================================
+\begin{algorithm2e}[t]   % <--- 这里加上了 2e
+\caption{Phase 2: Prototype-based Classifier Re-Training (cRT)}
+\label{alg:crt}
+\SetAlgoLined
+\KwIn{Converged network from Phase 1, target task ID $t$.\\
+Prototype Bank $\mathcal{M}_{proto}$, cRT epochs $E=10$.}
+\KwOut{Network with calibrated classifier boundaries.}
+
+\tcp{1. State Deactivation \& Gradient Freezing}
+\texttt{use\_perturbation} $\leftarrow \text{False}$ \tcp*{Deactivate BRDSP}
+\For{each parameter $\theta \in \{\text{Backbone}, \text{Task Adapters}\}$}{
+    $\theta.\text{requires\_grad} \leftarrow \text{False}$ \tcp*{Lock latent manifold}
+}
+\For{each parameter $\phi \in \text{Task Classifiers}$}{
+    $\phi.\text{requires\_grad} \leftarrow \text{True}$ \tcp*{Enable calibration}
+}
+
+\tcp{2. Data Preparation}
+Extract strictly balanced micro-budget exemplars from $\mathcal{M}_{proto}$\;
+Apply Data Augmentations (e.g., \texttt{ColorJitter}, \texttt{RandomCrop})\;
+Initialize SGD optimizer for $\phi$ with $lr=5 \times 10^{-3}$\;
+
+\tcp{3. Calibration Optimization Loop}
+\For{$epoch = 1$ \KwTo $E$}{
+    \For{mini-batch $(\mathbf{x}, \mathbf{y}, \mathbf{t}_{id}) \in \mathcal{M}_{proto}$}{
+        Zero gradients of SGD optimizer\;
+        $\mathbf{S}_{all} \leftarrow \text{Forward}(\mathbf{x}, \mathbf{t}_{id})$\;
+        $\mathcal{L}_{ce} \leftarrow \text{CrossEntropy}(\mathbf{S}_{all}[:, t, :], \mathbf{y})$\;
+        $\mathcal{L}_{con} \leftarrow \text{FAMEACL}(\mathbf{S}_{all}, \mathbf{y}, \mathbf{t}_{id})$\;
+        $\mathcal{L}_{total} \leftarrow \mathcal{L}_{ce} + \mathcal{L}_{con}$\;
+        $\mathcal{L}_{total}.\text{backward}()$\;
+        Update classifier parameters $\phi$ via SGD\;
+    }
+}
+\tcp{4. State Restoration}
+Restore original \texttt{requires\_grad} and \texttt{use\_perturbation} states\;
+\end{algorithm2e} % <--- 结尾也要加上 2e
+
+\section{Theoretical Analysis}\label{app:theoretical_analysis}
+
+In this section, we provide a formal analysis of the proposed framework. Our goal is to theoretically clarify how the three components, namely Dynamic Sparse Sub-network Extraction (DSSE), Bounded Re-sampling and Dynamic Semantic Perturbation (BRDSP), and Frequency-Aware Multi-Expert Adversarial Contrastive Learning (FAMEACL), jointly address catastrophic forgetting, tail-class under-coverage, and classifier boundary bias in long-tailed continual learning.
+
+\paragraph{Preliminaries.}
+Let the task stream be denoted by $\mathcal{T}=\{\mathcal{T}^{1},\dots,\mathcal{T}^{T}\}$, where each task $\mathcal{T}^{t}$ contains a disjoint label set $\mathcal{Y}_{t}$ and $\mathcal{Y}_{i}\cap\mathcal{Y}_{j}=\varnothing$ for any $i\neq j$. Let $f_{\theta}(\cdot)$ be the shared feature extractor and let the routed expert for task $t$ be
+\begin{equation}
+F_{\mathrm{pre}}({\bf x},t)=f_{\xi_t}\Big({\mathcal{A}}_t\big(({\bf W}_{\mathcal{T}^{t}}{\bf h}_{\mathrm{cls}}+{\bf b}_{\mathcal{T}^{t}})\odot \sigma({\bf s}^{t})\big)\Big),
+\label{eq:theory-predictor}
+\end{equation}
+where ${\bf h}_{\mathrm{\rm cls}}=f_{\theta}({\bf x})$.
+
+To make the analysis rigorous, we introduce the following assumptions.
+
+\begin{assumption}[Task-disjoint routing]
+For each sample from task $t$, the corresponding routed expert is $f_{\xi_t}$, and the contrastive objective compares this expert against all other experts.
+\end{assumption}
+
+\begin{assumption}[Hard freezing after warm-up]
+After the warm-up phase of task $t$, the final hard mask ${\bf m}^{t}$ is obtained by thresholding as in Eq.~(15), and all parameters selected by ${\bf m}^{t}$ for task $t$ are frozen during subsequent tasks.
+\end{assumption}
+
+\begin{assumption}[Smoothness]
+The cross-entropy loss and the contrastive loss are continuously differentiable almost everywhere with Lipschitz-continuous gradients with respect to trainable parameters in each training phase.
+\end{assumption}
+
+\begin{assumption}[Bounded perturbation]
+For each class $y$, the semantic perturbation vector satisfies $\|{\bf e}_y\|_2\le E$, and the random coefficient $\alpha\sim U(a,b)$ with $0\le a<b<\infty$.
+\end{assumption}
+
+\begin{assumption}[Local separability]
+In a local neighborhood of the current iterate, each routed expert admits a linear approximation in the latent space, and increasing the score gap between the target expert and irrelevant experts reduces the local classification error.
+\end{assumption}
+
+These assumptions are standard for analyzing modular continual learning systems and margin-based optimization. Under these assumptions, we next study the role of each module.
+
+\paragraph{Analysis of DSSE.}
+We first show that DSSE suppresses destructive interference on previously learned task-specific parameters.
+
+\begin{theorem}[Zero gradient interference on frozen paths]
+\label{thm:no-interference}
+Let $\Theta^{(t)}_{\mathrm{sel}}$ denote the set of parameters selected by the final hard mask ${\bf m}^t$ for task $t$. Under Assumption 2, during the optimization of any future task $u>t$, we have
+\begin{equation}
+\nabla_{\Theta^{(t)}_{\mathrm{sel}}}\mathcal{L}^{(u)}_{\mathrm{total}}=0.
+\label{eq:no-interference}
+\end{equation}
+Consequently, the selected task-specific sub-network parameters of task $t$ remain invariant during the training of later tasks.
+\end{theorem}
+
+\begin{proof}
+After the warm-up phase of task $t$, the selected parameters $\Theta^{(t)}_{\mathrm{sel}}$ are frozen by construction. Hence, for any subsequent task $u>t$, these parameters are treated as constants in the computation graph of $\mathcal{L}^{(u)}_{\mathrm{total}}$. Therefore, for every $\theta\in \Theta^{(t)}_{\mathrm{sel}}$,
+\begin{equation}
+\frac{\partial \mathcal{L}^{(u)}_{\mathrm{total}}}{\partial \theta}=0.
+\end{equation}
+Collecting all such coordinates yields
+\begin{equation}
+\nabla_{\Theta^{(t)}_{\mathrm{sel}}}\mathcal{L}^{(u)}_{\mathrm{total}}=0.
+\end{equation}
+Thus, gradient-based optimization on later tasks cannot modify the selected sub-network parameters of task $t$, proving the claim.
+\end{proof}
+
+\begin{corollary}[Representation invariance on preserved paths]
+\label{cor:representation-invariance}
+Suppose a sample $x$ from task $t$ is processed only through the frozen selected sub-network $\Theta^{(t)}_{\mathrm{sel}}$ and the frozen expert $f_{\xi_t}$. Then its task-specific latent representation $z^{t}({\bf x})$ and prediction $F_{\mathrm{pre}}({\bf x},t)$ remain invariant under the training of all future tasks.
+\end{corollary}
+
+\begin{proof}
+By Theorem~\ref{thm:no-interference}, all parameters in the selected path for task $t$ remain unchanged after task $t$ is learned. Since the routed expert $f_{\xi_t}$ is also frozen, every parameter involved in the mapping from input $x$ to $z^t({\bf x})$ and then to $F_{\mathrm{pre}}({\bf x},t)$ remains fixed. Hence both the latent representation and the prediction are invariant during later training.
+\end{proof}
+
+\begin{proposition}[Capacity-bounded growth]
+\label{prop:capacity-bound}
+Let $K$ be the maximum number of candidate neurons allocated to each task before hard pruning, and let $r_t=\|{\bf m}^t\|_0$ denote the number of retained neurons after warm-up. Then after learning $T$ tasks, the total number of active task-specific neurons satisfies
+\begin{equation}
+\sum_{t=1}^{T} r_t \le KT.
+\label{eq:capacity-bound}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+By construction, task $t$ is assigned at most $K$ candidate neurons before pruning, and hard thresholding can only remove neurons rather than increase their number. Therefore $r_t\le K$ for every task $t$. Summing over all tasks gives
+\begin{equation}
+\sum_{t=1}^{T} r_t \le \sum_{t=1}^{T} K = KT.
+\end{equation}
+This completes the proof.
+\end{proof}
+
+\paragraph{Analysis of BRDSP.}
+We next analyze how bounded re-sampling and semantic perturbation improve the effective coverage of minority classes.
+
+\begin{proposition}[Lower bound on tail exposure frequency]
+\label{prop:tail-exposure}
+Let class $y$ appear $n_y$ times in the current task and let $N_{\max}$ denote the head-class count. Under Eq.~(7), the re-sampled exposure count is
+\begin{equation}
+n_y^{\mathrm{target}}=\min(N_{\max},\gamma n_y).
+\end{equation}
+Then for every class $y$,
+\begin{equation}
+n_y^{\mathrm{target}}\ge n_y.
+\label{eq:exposure-lower-bound}
+\end{equation}
+In particular, for a tail class with imbalance ratio $\rho_y=N_{\max}/n_y$, its normalized exposure ratio satisfies
+\begin{equation}
+\frac{n_y^{\mathrm{target}}}{N_{\max}}=\min\Big(1,\frac{\gamma}{\rho_y}\Big),
+\label{eq:normalized-exposure}
+\end{equation}
+which is never smaller than the original ratio $1/\rho_y$.
+\end{proposition}
+
+\begin{proof}
+Since $\gamma\ge 1$ in the re-sampling regime, we have $\gamma n_y\ge n_y$. Therefore,
+\begin{equation}
+n_y^{\mathrm{target}}=\min(N_{\max},\gamma n_y)\ge n_y,
+\end{equation}
+which proves Eq.~\eqref{eq:exposure-lower-bound}. For the normalized ratio,
+\begin{equation}
+\frac{n_y^{\mathrm{target}}}{N_{\max}}
+=\min\Big(\frac{N_{\max}}{N_{\max}},\frac{\gamma n_y}{N_{\max}}\Big)
+=\min\Big(1,\frac{\gamma}{\rho_y}\Big).
+\end{equation}
+Since the original exposure ratio is $n_y/N_{\max}=1/\rho_y$, the new ratio is never smaller. This proves the claim.
+\end{proof}
+
+\begin{theorem}[Semantic perturbation enlarges tail feature coverage]
+\label{thm:covariance-expansion}
+Let the perturbed representation of class $y$ be
+\begin{equation}
+\widetilde{\bf h}_{\mathrm{cls}} = {\bf h}_{\mathrm{cls}} + \alpha \lambda_y {\bf e}_y,
+\label{eq:perturbed-feature-theory}
+\end{equation}
+where $\alpha\sim U(a,b)$ and ${\bf e}_y$ is treated as fixed within a local optimization step. Then the conditional mean and covariance satisfy
+\begin{equation}
+\mathbb{E}[\widetilde{\bf h}_{\mathrm{cls}}\mid y]
+=
+\mathbb{E}[{\bf h}_{\mathrm{cls}}\mid y]
++
+\bar{\alpha}\lambda_y {\bf e}_y,
+\qquad
+\bar{\alpha}=\frac{a+b}{2},
+\label{eq:perturbed-mean}
+\end{equation}
+and
+\begin{equation}
+\mathrm{Cov}(\widetilde{\bf h}_{\mathrm{cls}}\mid y)
+=
+\mathrm{Cov}({\bf h}_{\mathrm{cls}}\mid y)
++
+\lambda_y^2\mathrm{Var}(\alpha){\bf e}_y{\bf e}_y^\top,
+\label{eq:perturbed-cov}
+\end{equation}
+where
+\begin{equation}
+\mathrm{Var}(\alpha)=\frac{(b-a)^2}{12}.
+\end{equation}
+Consequently, BRDSP injects a positive semidefinite covariance increment along the class-aware direction ${\bf e}_y$, thereby enlarging the explored feature region of class $y$.
+\end{theorem}
+
+\begin{proof}
+By Eq.~\eqref{eq:perturbed-feature-theory} and the linearity of expectation,
+\begin{equation}
+\mathbb{E}[\widetilde{\bf h}_{\mathrm{cls}}\mid y]
+=
+\mathbb{E}[{\bf h}_{\mathrm{cls}}\mid y]+\mathbb{E}[\alpha]\lambda_y {\bf e}_y
+=
+\mathbb{E}[{\bf h}_{\mathrm{cls}}\mid y]+\bar{\alpha}\lambda_y {\bf e}_y.
+\end{equation}
+This proves Eq.~\eqref{eq:perturbed-mean}.
+
+For the covariance, under the independence of $\alpha$ and ${\bf h}_{\mathrm{cls}}$ at the instance level,
+\begin{align}
+\mathrm{Cov}(\widetilde{\bf h}_{\mathrm{cls}}\mid y)
+&=
+\mathrm{Cov}({\bf h}_{\mathrm{cls}}+\alpha\lambda_y {\bf e}_y\mid y) \\
+&=
+\mathrm{Cov}({\bf h}_{\mathrm{cls}}\mid y)+\mathrm{Cov}(\alpha\lambda_y {\bf e}_y).
+\end{align}
+Since ${\bf e}_y$ is fixed locally,
+\begin{equation}
+\mathrm{Cov}(\alpha\lambda_y {\bf e}_y)
+=
+\lambda_y^2 \mathrm{Var}(\alpha) {\bf e}_y{\bf e}_y^\top.
+\end{equation}
+Because $\alpha\sim U(a,b)$,
+\begin{equation}
+\mathrm{Var}(\alpha)=\frac{(b-a)^2}{12}.
+\end{equation}
+Substituting this into the above expression yields Eq.~\eqref{eq:perturbed-cov}. Finally, since ${\bf e}_y{\bf e}_y^\top$ is positive semidefinite, the covariance increment is also positive semidefinite. Hence the perturbation enlarges the explored feature region along a class-aware direction.
+\end{proof}
+
+\begin{corollary}[Tail classes receive stronger diversity compensation]
+\label{cor:tail-diversity}
+If the gate $\lambda_y$ is monotonically decreasing with respect to class frequency $n_y$, then for two classes $y_1$ and $y_2$ with $n_{y_1}<n_{y_2}$, the perturbation-induced covariance increment for class $y_1$ is larger in scale than that for class $y_2$.
+\end{corollary}
+
+\begin{proof}
+When $n_{y_1}<n_{y_2}$ and $\lambda_y$ decreases monotonically with class frequency, we have $\lambda_{y_1}\ge \lambda_{y_2}$. By Eq.~\eqref{eq:perturbed-cov}, the perturbation-induced covariance increment scales with $\lambda_y^2$. Therefore the rarer class receives a stronger covariance expansion term, implying stronger diversity compensation.
+\end{proof}
+
+\paragraph{Analysis of FAMEACL.}
+We now analyze the effect of the frequency-aware contrastive loss in Eq.~(11).
+
+For sample $({\bf x}_i,y_i)$ from task $t_i$, define the score gap
+\begin{equation}
+\Delta_i
+=
+F_{\mathrm{score}}({\bf x}_i,y_i,t_i)
+-
+\max_{j\neq t_i}F_{\mathrm{score}}({\bf x}_i,y_i,j).
+\label{eq:score-gap}
+\end{equation}
+Then the corresponding hinge term can be written as
+\begin{equation}
+\ell_i=\max(0,m_{y_i}-\Delta_i).
+\label{eq:hinge-per-sample}
+\end{equation}
+
+\begin{theorem}[Margin satisfaction condition]
+\label{thm:margin-condition}
+For any sample $i$, the hinge loss $\ell_i$ equals zero if and only if
+\begin{equation}
+F_{\mathrm{score}}({\bf x}_i,y_i,t_i)
+\ge
+\max_{j\neq t_i}F_{\mathrm{score}}({\bf x}_i,y_i,j)+m_{y_i}.
+\label{eq:margin-satisfaction}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+From Eq.~\eqref{eq:hinge-per-sample}, $\ell_i=0$ holds if and only if
+\begin{equation}
+m_{y_i}-\Delta_i\le 0,
+\end{equation}
+which is equivalent to
+\begin{equation}
+\Delta_i\ge m_{y_i}.
+\end{equation}
+Substituting Eq.~\eqref{eq:score-gap} into the above inequality yields
+\begin{equation}
+F_{\mathrm{score}}({\bf x}_i,y_i,t_i)
+-
+\max_{j\neq t_i}F_{\mathrm{score}}({\bf x}_i,y_i,j)
+\ge m_{y_i},
+\end{equation}
+which is exactly Eq.~\eqref{eq:margin-satisfaction}. This proves the theorem.
+\end{proof}
+
+\begin{proposition}[Tail classes receive stricter separation constraints]
+\label{prop:tail-margin}
+Under Eq.~(12), the adaptive margin is
+\begin{equation}
+m_y=\frac{C_{\mathrm{scale}}}({n_y})^{0.25}.
+\end{equation}
+Hence for two classes $y_1$ and $y_2$ with $n_{y_1}<n_{y_2}$, we have
+\begin{equation}
+m_{y_1}>m_{y_2}.
+\end{equation}
+Therefore, rarer classes are required to satisfy larger expert-separation margins.
+\end{proposition}
+
+\begin{proof}
+Since $C_{\mathrm{scale}}>0$ is constant and $n_{y_1}<n_{y_2}$, it follows directly that
+\begin{equation}
+\frac{C_{\mathrm{scale}}}{n_{y_1}}>\frac{C_{\mathrm{scale}}}{n_{y_2}}.
+\end{equation}
+Thus $m_{y_1}>m_{y_2}$, proving the claim.
+\end{proof}
+
+\begin{theorem}[Gradient direction suppresses irrelevant expert over-response]
+\label{thm:gradient-direction}
+Consider a sample $i$ such that $\ell_i>0$, and let
+\begin{equation}
+j^\star\in\arg\max_{j\neq t_i}F_{\mathrm{score}}({\bf x}_i,y_i,j).
+\end{equation}
+At any differentiable point of the max operator, the partial derivatives of $\ell_i$ with respect to the target expert score and the hardest irrelevant-expert score satisfy
+\begin{equation}
+\frac{\partial \ell_i}{\partial F_{\mathrm{score}}({\bf x}_i,y_i,t_i)}=-1,
+\qquad
+\frac{\partial \ell_i}{\partial F_{\mathrm{score}}({\bf x}_i,y_i,j^\star)}=1.
+\label{eq:gradient-direction}
+\end{equation}
+The same conclusion holds in subgradient form at non-differentiable points. Therefore, gradient descent increases the target expert score and suppresses the strongest irrelevant expert response.
+\end{theorem}
+
+\begin{proof}
+When $\ell_i>0$, Eq.~\eqref{eq:hinge-per-sample} becomes
+\begin{equation}
+\ell_i
+=
+m_{y_i}
+-
+F_{\mathrm{score}}({\bf x}_i,y_i,t_i)
++
+\max_{j\neq t_i}F_{\mathrm{score}}({\bf x}_i,y_i,j).
+\end{equation}
+At a differentiable point where the maximizer $j^\star$ is unique, differentiating with respect to the target and hardest irrelevant scores gives
+\begin{equation}
+\frac{\partial \ell_i}{\partial F_{\mathrm{score}}({\bf x}_i,y_i,t_i)}=-1,
+\qquad
+\frac{\partial \ell_i}{\partial F_{\mathrm{score}}({\bf x}_i,y_i,j^\star)}=1.
+\end{equation}
+At non-differentiable points, the max function admits a subgradient supported on the set of maximizers, leading to the same monotonic conclusion. Therefore, a gradient descent step increases the target expert score and decreases the competitiveness of the strongest irrelevant expert.
+\end{proof}
+
+\paragraph{Joint analysis of the unified objective.}
+The full objective is
+\begin{equation}
+\mathcal{L}_{\mathrm{total}}
+=
+\mathcal{L}_{\mathrm{ce}}
++
+\lambda_{\mathrm{con}}\mathcal{L}_{\mathrm{con}}
++
+\lambda_{\mathrm{reg}}\mathcal{L}_{\mathrm{reg}}.
+\label{eq:full-objective-theory}
+\end{equation}
+
+\begin{proposition}[Three-level optimization decomposition]
+\label{prop:gradient-decomp}
+The gradient of the full objective can be decomposed as
+\begin{equation}
+\nabla \mathcal{L}_{\mathrm{total}}
+=
+\nabla \mathcal{L}_{\mathrm{ce}}
++
+\lambda_{\mathrm{con}}\nabla \mathcal{L}_{\mathrm{con}}
++
+\lambda_{\mathrm{reg}}\nabla \mathcal{L}_{\mathrm{reg}}.
+\label{eq:gradient-decomposition}
+\end{equation}
+Thus, the optimization simultaneously performs sample fitting, inter-expert boundary shaping, and sparse task-specific structural isolation.
+\end{proposition}
+
+\begin{proof}
+The result follows immediately from the linearity of differentiation applied to Eq.~\eqref{eq:full-objective-theory}.
+\end{proof}
+
+\begin{theorem}[Convergence to a first-order stationary point]
+\label{thm:stationary-point}
+Assume that Assumption 3 holds and that each training phase is optimized by stochastic gradient descent with step sizes $\{\eta_k\}_{k\ge 1}$ satisfying
+\begin{equation}
+\eta_k>0,\qquad \sum_{k=1}^{\infty}\eta_k=\infty,\qquad \sum_{k=1}^{\infty}\eta_k^2<\infty,
+\label{eq:sgd-conditions}
+\end{equation}
+together with unbiased stochastic gradients of bounded second moment. Then the iterates $\Theta_k$ satisfy
+\begin{equation}
+\liminf_{k\to\infty}\mathbb{E}\|\nabla \mathcal{L}_{\mathrm{total}}(\Theta_k)\|_2^2=0.
+\label{eq:stationary-result}
+\end{equation}
+Hence the optimization converges to a first-order stationary point in expectation.
+\end{theorem}
+
+\begin{proof}
+Under Assumption 3, the objective $\mathcal{L}_{\mathrm{total}}$ is smooth almost everywhere and admits Lipschitz-continuous gradients. Under the stochastic approximation conditions in Eq.~\eqref{eq:sgd-conditions}, together with unbiased stochastic gradients of bounded variance, the standard Robbins--Monro argument for non-convex stochastic optimization applies. In particular, one obtains
+\begin{equation}
+\sum_{k=1}^{\infty}\eta_k\,\mathbb{E}\|\nabla \mathcal{L}_{\mathrm{total}}(\Theta_k)\|_2^2 < \infty,
+\end{equation}
+which implies
+\begin{equation}
+\liminf_{k\to\infty}\mathbb{E}\|\nabla \mathcal{L}_{\mathrm{total}}(\Theta_k)\|_2^2=0.
+\end{equation}
+Therefore the iterates converge to a first-order stationary point in expectation.
+\end{proof}
+
+\begin{theorem}[Decoupled mitigation of LTCL failure modes]
+\label{thm:main-theory}
+Under Assumptions 1--5, the proposed framework provides the following guarantees:
+\begin{enumerate}
+    \item DSSE suppresses catastrophic forgetting by eliminating gradient interference on previously frozen task-specific paths.
+    \item BRDSP increases minority-class exposure frequency and enlarges the explored feature covariance of tail classes along class-aware directions.
+    \item FAMEACL enforces expert exclusivity and assigns larger separation margins to rarer classes, thereby correcting classifier-level long-tail bias.
+    \item The unified objective is optimized toward a first-order stationary point under standard stochastic optimization conditions.
+\end{enumerate}
+
+Therefore, the proposed method addresses long-tailed continual learning at three complementary levels: parameter preservation, representation enrichment, and decision-boundary correction.
+\end{theorem}
+
+\begin{proof}
+Item 1 follows from Theorem~\ref{thm:no-interference} and Corollary~\ref{cor:representation-invariance}. Item 2 follows from Proposition~\ref{prop:tail-exposure}, Theorem~\ref{thm:covariance-expansion}, and Corollary~\ref{cor:tail-diversity}. Item 3 follows from Theorem~\ref{thm:margin-condition}, Proposition~\ref{prop:tail-margin}, and Theorem~\ref{thm:gradient-direction}. Item 4 follows from Theorem~\ref{thm:stationary-point}. Combining these results proves the claim.
+\end{proof}
+
+\paragraph{Discussion.}
+The above analysis shows that the three components are theoretically complementary. DSSE preserves previously learned task-specific computation paths but does not by itself improve tail-class coverage. BRDSP enriches the effective support of minority representations but does not directly prevent cross-expert false activation. FAMEACL corrects boundary bias by explicitly enforcing expert exclusivity, yet it benefits from richer tail representations and reduced cross-task interference. Therefore, their joint optimization yields a principled solution to long-tailed continual learning.
+
+\section{Detailed Experimental Setup}
+\label{sec:appendix_implementation}
+
+To facilitate reproducibility, we provide comprehensive details regarding the network architectures, optimization strategies, and hyperparameter settings used in our experiments.
+
+\subsection{Network Architecture and Backbone}
+Across our experiments (e.g., on the long-tailed CUB-200 benchmark), we employ a pre-trained Vision Transformer (\textbf{ViT}) as our feature extractor. 
+\begin{itemize}
+    \item \textbf{Input Resolution:} The input images are resized and cropped to \textbf{$224 \times 224$} via standard torchvision transformations before being fed into the ViT backbone.
+    \item \textbf{Backbone Freezing Strategy:} To balance stability and plasticity, the ViT backbone is \textbf{partially frozen}. Specifically, we freeze the shallow layers and only allow the last \textbf{3} layers (\texttt{freeze\_last\_k = 3}) along with the task-specific adapters and classifiers to be updated during training. This prevents catastrophic forgetting of general features while maintaining adaptability for fine-grained new tasks.
+\end{itemize}
+
+\subsection{Training Hyperparameters}
+Our training pipeline is implemented in PyTorch and decoupled into two primary phases: the main continual task learning phase and the Prototype-based Classifier Representation Training (cRT) phase. 
+
+\textbf{Phase 1: Main Task Learning}
+\begin{itemize}
+    \item \textbf{Optimizer:} We use the \textbf{SGD} (or Adam/AdamW based on specific configurations) optimizer.
+    \item \textbf{Learning Rate:} The initial learning rate is set to \textbf{0.03}.
+    \item \textbf{Batch Size:} The mini-batch size is set to \textbf{32}.
+    \item \textbf{Epochs:} The model is trained for \textbf{15} epochs per task.
+    \item \textbf{Weight Decay:} Set according to the default optimizer arguments (typically \textbf{0} for standard SGD unless explicitly specified).
+    \item \textbf{Scheduler:} A constant learning rate is maintained throughout the phase without an explicit step or cosine decay scheduler, ensuring stable gradient updates for sparse routing.
+\end{itemize}
+
+\textbf{Phase 2: Prototype-based cRT (Calibration)}
+To rectify the decision boundaries biased by the long-tailed distribution, we conduct a swift calibration phase using the memory buffer.
+\begin{itemize}
+    \item \textbf{Memory Budget:} The global prototype memory capacity is strictly constrained to \textbf{200} exemplars (\texttt{prototype\_size = 200}), managed by our dynamic water-filling allocation strategy.
+    \item \textbf{Optimizer:} We employ the \textbf{SGD} optimizer with a momentum of \textbf{0.9}.
+    \item \textbf{Learning Rate:} A lower learning rate of \textbf{0.005} (\texttt{5e-3}) is utilized to gently fine-tune the classifiers without disrupting the learned representations.
+    \item \textbf{Batch Size:} The batch size for prototype replay remains strictly at \textbf{32}.
+    \item \textbf{Epochs:} The calibration phase runs for \textbf{10} epochs per task.
+    \item \textbf{Weight Decay:} A weight decay of \textbf{1e-4} is applied to prevent overfitting on the limited prototype data.
+    \item \textbf{Freezing Status:} During this phase, the \textbf{entire backbone is strictly frozen} (\texttt{requires\_grad = False}). Only the parameters of the task classifiers are unfrozen and optimized.
+\end{itemize}
+
+\subsection{Hardware and Reproducibility}
+The default configuration uses random seed 42; the three-run CUB-200 comparison in the main paper's Repeatability Across Random Seeds subsection additionally evaluates seeds 30 and 60. Data loading is optimized with \texttt{num\_workers = 0} to ensure deterministic batch construction in our imbalanced sampling environment.
+
+\section{Supplementary Material}
+\subsection{Detailed Analysis of Learning Dynamics and Efficiency}
+\label{sec:appendix_detailed_metrics}
+
+To provide further granularity on the learning dynamics and resource efficiency of our proposed framework, we report additional fine-grained metrics on the CUB-200 and ImageNet-R benchmarks in Table~\ref{tab:detailed_metrics_appendix}.
+
+\begin{table}[h]
+  \centering
+  \caption{Detailed analysis of learning dynamics, fine-grained accuracy, and efficiency.}
+  \label{tab:detailed_metrics_appendix}
+  \small
+  \setlength{\tabcolsep}{8pt} 
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Metric} & \textbf{CUB-200} & \textbf{ImageNet-R} \\
+    \midrule
+    Final Avg Acc & 81.32\% & 71.93\% \\
+    Plasticity ($\mathcal{A}_{init}$) & 83.88\% & 74.16\% \\
+    Stability (Avg Forget) & 3.08\% & 3.61\% \\
+    Backward Transfer & -2.84\% & -2.48\% \\
+    \midrule
+    Head (Many-shot) & 82.42\% & 78.40\% \\
+    Mid (Medium-shot) & 82.34\% & 72.87\% \\
+    Tail (Few-shot) & 78.62\% & 63.55\% \\
+    \midrule
+    FLOPS (G) & 33.73 \footnotesize{(+0.01)} & 33.73 \footnotesize{(+0.01)} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+As detailed in Table~\ref{tab:detailed_metrics_appendix}, our framework elegantly balances Plasticity (achieving an 83.88\% initial accuracy on CUB-200) with Stability (maintaining an exceptionally low average forgetting rate of 3.08\%). Furthermore, the fine-grained accuracy breakdown indicates that our method successfully bridges the performance gap across varying class frequencies. On CUB-200, the framework records 82.42\% on Many-shot (Head) classes and a highly competitive 78.62\% on Few-shot (Tail) classes, proving that it does not trivially achieve high overall accuracy by overfitting to the head. Finally, the computational footprint is heavily optimized, incurring only a marginal +0.01G FLOPS increase during inference compared to the standard backbone.
+
+\subsection{Hyperparameter Sensitivity}
+\label{sec:supp_hyperparameters}
+
+We examine three settings that control expert separation and tail-class augmentation on CUB-200: the base margin, the maximum oversampling ratio $\gamma$, and the frequency-gating exponent $\rho$. Table~\ref{tab:hyperparameters} summarizes the corresponding sensitivity experiments. Because the blocks correspond to successive tuning stages, accuracy comparisons are made within each block.
+
+\begin{table}[!t]
+\centering
+\caption{Hyperparameter sensitivity on CUB-200. Each block reports the evaluated settings and final average accuracy (\%).}
+\label{tab:hyperparameters}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1} 
+\begin{tabular}{llc}
+\toprule
+\textbf{Hyperparameter} & \textbf{Value} & \textbf{Accuracy (\%)} \\
+\midrule
+% ---------------------------------------------------
+% 1. Dynamic Margin Base Level
+% ---------------------------------------------------
+\multirow{4}{*}{\shortstack[l]{Dynamic Margin Base Level \\ ($base\_cosine\_margin$)}} 
+& 0.15 & 78.10 \\
+& \textbf{0.25} & \textbf{79.24} \\
+& 0.35 & 75.84 \\
+& 0.45 & 78.80 \\
+\midrule
+% ---------------------------------------------------
+% 2. Max Oversample Ratio
+% ---------------------------------------------------
+\multirow{4}{*}{\shortstack[l]{Max Oversample Ratio \\ ($\gamma$)}} 
+& 1 & 79.42 \\
+& \textbf{2} & \textbf{80.57} \\
+& 4 & 79.24 \\
+& 8 & 79.30 \\
+\midrule
+% ---------------------------------------------------
+% 3. Frequency Gating Decay (Rho)
+% ---------------------------------------------------
+\multirow{4}{*}{\shortstack[l]{Frequency Gating Decay \\ ($\rho$)}} 
+& 1 & 80.58 \\
+& 2 & 80.57 \\
+& \textbf{3} & \textbf{80.79} \\
+& 4 & 80.54 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For the base margin, $0.25$ gives the highest accuracy among the four tested values (79.24\%), whereas increasing it to $0.35$ reduces accuracy to 75.84\%. Thus, stronger separation constraints do not consistently improve recognition. With the base margin fixed at $0.25$, bounded oversampling at $\gamma=2$ reaches 80.57\%, compared with 79.42\% without oversampling ($\gamma=1$). Increasing the ratio to 4 or 8 yields 79.24\% and 79.30\%, respectively, supporting a moderate oversampling budget for this setting.
+
+In the final gating sweep, $\rho=3$ gives 80.79\%, while the other tested exponents yield 80.54--80.58\%. The small variation in this block suggests limited sensitivity within the evaluated range. These results support the selected settings, but the sweeps do not establish that the same configuration is optimal for every dataset.
+
+\subsection{Extended Experimental Analysis}
+\label{sec:extended_analysis}
+
+To further demonstrate the superiority and detailed learning dynamics of our proposed method, we conduct an extended evaluation tracking the task-by-task accuracy evolution (Progress) and the final per-task performance after continual learning (Final). The comprehensive visualizations across four benchmarks are presented in Figure~\ref{fig:appendix_extended_results}.
+
+\begin{figure*}[t] 
+  \centering
+  \captionsetup[subfigure]{labelformat=simple}
+  \renewcommand\thesubfigure{(\alph{subfigure})}
+  \newcommand{\subfigwidth}{0.32\textwidth}
+
+  %%% First Row: Progress / Evolution %%%
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/cub_progress.pdf}
+    \caption{Accuracy Evolution on CUB-200}
+    \label{fig:app_cub_progress}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/office_progress.pdf}
+    \caption{Accuracy Evolution on Office-Home}
+    \label{fig:app_office_progress}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/imagenetr_progress.pdf}
+    \caption{Accuracy Evolution on ImageNet-R}
+    \label{fig:app_imagenetr_progress}
+  \end{subfigure}
+
+   % Spacing between rows
+
+  %%% Second Row: Final %%%
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/tiny_final.pdf}
+    \caption{Final Per-task Accuracy on TinyImageNet}
+    \label{fig:app_tiny_final}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/office_final.pdf}
+    \caption{Final Per-task Accuracy on Office-Home}
+    \label{fig:app_office_final}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}{\subfigwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/imagenetr_final.pdf}
+    \caption{Final Per-task Accuracy on ImageNet-R}
+    \label{fig:app_imagenetr_final}
+  \end{subfigure}
+
+  
+  \caption{\textbf{Extended learning dynamics and anti-forgetting analysis.} (a-c) Task-by-task average accuracy evolution (Progress) across CUB-200, Office-Home, and ImageNet-R. (d-f) The final preserved accuracy for each historical task (Final) after completing the entire continual learning sequence on TinyImageNet, Office-Home, and ImageNet-R.}
+  \label{fig:appendix_extended_results}
+  
+\end{figure*}
+
+\textbf{Analysis on CUB-200 (Progress).} 
+As depicted in Figure~\ref{fig:appendix_extended_results}(a), the learning trajectory on the fine-grained CUB-200 benchmark strictly evaluates the models' anti-forgetting capability under severe long-tailed distributions. While classic replay-based methods like DER and prompt-based methods experience rapid performance decay as the sequence lengthens, our method maintains an exceptionally high and stable curve. Starting from an initial accuracy of 93.78\% on Task 1, our method only drops marginally to 80.79\% by Task 10. This indicates that our Dynamic Sparse Sub-network Extraction (DSSE) elegantly locks the task-specific parameters, preventing gradient overwriting on older fine-grained avian concepts.
+
+\textbf{Analysis on Office-Home (Progress \& Final).} 
+On the Office-Home benchmark, which features natural domain shifts and inherent imbalance, our method exhibits absolute dominance. As shown in the progress curve (Figure~\ref{fig:appendix_extended_results}(b)), our method establishes the highest starting point (97.53\%) and concludes with a remarkable 91.11\% global average after 5 tasks. More importantly, the final per-task accuracy detailed in Figure~\ref{fig:appendix_extended_results}(e) reveals that our method is the only framework capable of preserving $\sim$90\% accuracy evenly across all 5 historical tasks. In stark contrast, methods like L2P and DualPrompt suffer from catastrophic domain interference, dropping to single-digit or near-zero accuracy on early tasks (e.g., L2P drops to 0.00\% on Task 1).
+
+\textbf{Analysis on TinyImageNet (Final).} 
+Figure~\ref{fig:appendix_extended_results}(d) illustrates the final per-task retention on TinyImageNet after 10 incremental stages. Our method demonstrates a highly balanced and robust retention profile, maintaining accuracies predominantly within the 82\%-88\% range for all 10 tasks. While StarPrompt and RanPAC also show competitive retention, traditional baselines such as DER and L2P exhibit severe ``recency bias,'' maintaining acceptable performance only on the final tasks (Task 10) but failing catastrophically on earlier ones.
+
+\textbf{Analysis and Limitations on ImageNet-R (Progress \& Final).} 
+While our framework establishes state-of-the-art performance on most datasets, the learning dynamics on ImageNet-R (Figure~\ref{fig:appendix_extended_results}(c) and (f)) expose certain limitations. ImageNet-R is inherently challenging as it comprises diverse styles (e.g., cartoons, paintings, sculptures) with extreme intra-class variance. As observed in Figure~\ref{fig:appendix_extended_results}(c), our initial accuracy on Task 1 (91.41\%) is lower than MoE-Adapter (97.46\%) and StarPrompt (98.63\%), and our final average settles at 71.93\%. 
+This performance gap stems from two primary factors. First, from the perspective of contrastive learning, when confronting classes with massive intra-class stylistic disparities, a micro-budget prototype rehearsal strategy (storing merely a few samples per class) is insufficient to capture the representative feature manifold of the entire class. Second, our scalable architecture fundamentally prioritizes strict parameter isolation to prevent forgetting. While highly effective for relatively cohesive distributions, this rigid isolation restrains cross-task knowledge sharing, limiting the network's plasticity when attempting to generalize across highly heterogeneous artistic domains from the very beginning of the task sequence.
+
+
+\subsection{Visualizing Out-of-Distribution Robustness}
+\label{sec:ood_robustness}
+
+To comprehensively evaluate the robustness and the compactness of the latent manifold shaped by our proposed architecture, we conduct a rigorous Out-of-Distribution (OOD) detection experiment. We define the CUB-200 dataset as the In-Distribution (ID) and adopt ImageNet-R (ImageNet-Rendition) as the OOD benchmark. This setup poses a severe ``Semantic plus Domain Shift'' challenge, as ImageNet-R contains out-of-domain renditions such as art, cartoons, and sculptures that the model has never encountered.
+
+We adopt the Energy Score as the criterion for distinguishing ID from OOD samples. As illustrated in Figure~\ref{fig:ood_main}(a), the energy score distributions of the ID (blue) and OOD (red) samples are almost entirely disjoint. The network successfully assigns extremely high energy values to the unseen ImageNet-R samples, cleanly separating them from the known bird categories. 
+
+Quantitatively, as shown in the Receiver Operating Characteristic (ROC) curve in Figure~\ref{fig:ood_main}(b), our method achieves an exceptional AUROC of $99.50\%$. More importantly, at a stringent $95\%$ True Positive Rate (TPR), the False Positive Rate (FPR@95) is drastically suppressed to merely $0.46\%$. 
+
+\begin{figure*}[!t]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/ODD_Energy.pdf}
+    \caption{Energy Score Distribution}
+    \label{fig:ood_energy}
+  \end{subfigure}%
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \safeincludegraphics[width=\linewidth]{figures/ODD_AUROC.pdf}
+    \caption{ROC Curve}
+    \label{fig:ood_roc}
+  \end{subfigure}
+
+  \caption{Out-of-Distribution detection results on CUB-200 (ID) vs. ImageNet-R (OOD). (a) The Energy score distributions show a near-perfect separation between known and unknown domains. (b) The ROC curve demonstrates an AUROC of $99.50\%$ and an FPR@95 of $0.46\%$, indicating extreme robustness against domain shifts.}
+  \label{fig:ood_main}
+\end{figure*}
+
+\noindent \textbf{Mechanistic Insights.} 
+The fundamental reason behind this extraordinary OOD detection capability lies in the synergy of our Frequency-Aware Multi-Expert Adversarial Contrastive Learning (FAMEACL) and the dynamic margin mechanism. In conventional continual learning, the unconstrained expansion of task boundaries often leaves porous ``blind spots'' in the feature space, which are easily exploited by out-of-domain noise. In contrast, our approach explicitly enforces a dynamic, frequency-calibrated repulsive force. This loss sculpts a highly compact and discriminative latent manifold, tightly bounding the ID representations while forcefully repelling any unseen visual patterns into the high-energy penalty zones. Consequently, our framework not only mitigates catastrophic forgetting and long-tailed bias but also fortifies a highly resilient topological boundary against severe open-world distributional shifts.
+
+\section{Broader Societal Impacts}
+\label{sec:appendix_broader_impacts}
+
+The advancement of Long-Tailed Continual Learning (LTCL) systems presents several significant and positive societal impacts. First, from an environmental and economic perspective, our framework significantly alleviates the computational burden associated with training deep learning models. By enabling models to incrementally acquire new knowledge without catastrophically forgetting the old, we eliminate the need to repeatedly retrain massive networks from scratch whenever new data arrives, thereby reducing energy consumption and carbon footprints. 
+
+Second, from a fairness and inclusivity standpoint, addressing the long-tailed distribution problem is crucial for developing unbiased AI systems. Real-world data is inherently imbalanced; by specifically protecting and expanding the feature manifolds of minority (tail) classes through our BRDSP and FAMEACL mechanisms, our method helps prevent AI systems from discriminating against or ignoring underrepresented groups, rare species, or localized cultural artifacts in practical deployments.
+
+However, we must also acknowledge potential negative impacts and risks. Like all continual learning systems, our model continuously updates its parameters based on incoming data streams. In a real-world open deployment, this mechanism could be vulnerable to malicious data poisoning or backdoor attacks, where adversaries intentionally inject harmful or biased data into the stream to incrementally corrupt the model's decision boundaries. To mitigate these risks, deploying such systems in critical domains (e.g., healthcare, autonomous driving, or surveillance) requires rigorous data authentication, anomaly detection filters, and human-in-the-loop auditing to ensure the safety and integrity of the continuous data stream before the model ingests it.
+\newpage
+\end{document}
