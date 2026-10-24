@@ -65,9 +65,6 @@
 \section{Additional Information About Related Work}\label{app:related_work}
 
 
-% ... (前面保留你对其他具体 Related Work 的介绍) ...
-
-
 \noindent\textbf{Bridging the Gap between LT-CIL and LT-DIL.}
 Crucially, most existing incremental learning literature focuses narrowly on the Class-Incremental Learning (CIL) setting, leaving the complex interplay between long-tailed class distributions and domain shifts — specifically Domain-Incremental Learning (DIL) — severely under-explored. When domain shifts co-occur with class imbalance, semantic boundaries become highly distorted. For instance, advanced prompt-based architectures (e.g., L2P, DualPrompt) lack explicit mechanisms to calibrate imbalanced gradient flows, causing the learnable prompts to be overwhelmingly hijacked by head classes during domain shifts. Conversely, traditional rehearsal-based methods (e.g., DER++, iCaRL) suffer from severe representation overfitting on tail classes when forced to replay limited minority samples across evolving domains, rendering these conventional methods ineffective.
 
@@ -81,7 +78,7 @@ To bridge the gap between our conceptual formulations and the practical engineer
 While theoretical derivations provide a solid foundation for addressing the long-tailed continual learning (LTCL) dilemma, real-world deployment often hinges on meticulous engineering choices that are frequently omitted in standard literature. Specifically, the dynamic computation of inverse-frequency margins requires careful handling to prevent numerical instability (e.g., zero-division anomalies), and the two-phase calibration relies on strict gradient locking and perturbation deactivation to effectively rectify classifier bias without distorting the converged latent manifold. By explicitly exposing these low-level tensor operations, structural state-switching mechanisms, and hyperparameter scalings, we aim to ensure the full transparency and exact reproducibility of our framework in popular deep learning environments such as PyTorch.
 
 
-\begin{algorithm2e}[t]   % <--- 这里加上了 2e
+\begin{algorithm2e}[t]
 \caption{PyTorch-style Implementation of FAMEACL}
 \label{alg:fameacl}
 \SetAlgoLined
@@ -113,16 +110,13 @@ Initialize $\mathcal{L}_{con} \leftarrow 0.0$, $N_{neg} \leftarrow 0$\;
     }
 }
 \Return $\mathcal{L}_{con} / \max(N_{neg}, 1)$\;
-\end{algorithm2e} % <--- 
+\end{algorithm2e}
 
 
 
 
 
-% ==========================================
-% 伪代码 2: cRT 流程
-% ==========================================
-\begin{algorithm2e}[t]   % <--- 这里加上了 2e
+\begin{algorithm2e}[t]
 \caption{Phase 2: Prototype-based Classifier Re-Training (cRT)}
 \label{alg:crt}
 \SetAlgoLined
@@ -158,7 +152,7 @@ Initialize SGD optimizer for $\phi$ with $lr=5 \times 10^{-3}$\;
 }
 \tcp{4. State Restoration}
 Restore original \texttt{requires\_grad} and \texttt{use\_perturbation} states\;
-\end{algorithm2e} % <--- 结尾也要加上 2e
+\end{algorithm2e}
 
 \section{Theoretical Analysis}\label{app:theoretical_analysis}
 
